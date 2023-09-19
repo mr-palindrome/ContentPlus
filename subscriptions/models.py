@@ -11,7 +11,7 @@ class SubscriptionTier(BaseModel):
     def __str__(self):
         return self.name
 
-class SubscriptionFeature(models.Model):
+class SubscriptionFeature(BaseModel):
     name = models.CharField(max_length=255)
     description = models.TextField()
 
@@ -32,7 +32,7 @@ class SubscriptionPlan(BaseModel):
         self.name = self.tier.name
         super(SubscriptionPlan, self).save(*args, **kwargs)
 
-class PlanFeature(models.Model):
+class PlanFeature(BaseModel):
     plan = models.ForeignKey(SubscriptionPlan, on_delete=models.CASCADE)
     feature = models.ForeignKey(SubscriptionFeature, on_delete=models.CASCADE)
     included = models.CharField(max_length=255)
@@ -41,7 +41,7 @@ class PlanFeature(models.Model):
         return f'{self.plan} - {self.feature}'
 
 class UserSubscription(BaseModel):
-    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
+    user = models.ForeignKey(BaseUser, on_delete=models.CASCADE)
     plan = models.ForeignKey(SubscriptionPlan, on_delete=models.CASCADE)
     start_date = models.DateField()
     end_date = models.DateField()

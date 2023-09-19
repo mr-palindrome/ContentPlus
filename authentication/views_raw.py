@@ -3,7 +3,7 @@ from django.shortcuts import redirect
 from rest_framework.response import Response
 from rest_framework import status
 
-from common.utils.raw.google_service import (
+from core.utils.raw.google_service import (
     GoogleRawLoginFlowService,
 )
 from authentication.serializers import InputSerializer

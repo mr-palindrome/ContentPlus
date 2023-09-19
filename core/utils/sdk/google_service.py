@@ -1,15 +1,19 @@
 from typing import Any, Dict
+import requests
 
 import google_auth_oauthlib.flow
+import google.oauth2.credentials
+import google.auth.transport.requests
 import jwt
 import requests
 from attrs import define
+
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.urls import reverse_lazy
 
 from common.utils.exceptions import ApplicationError
-
+from authentication.models import GoogleTokens
 
 @define
 class GoogleSdkLoginCredentials:
@@ -22,6 +26,7 @@ class GoogleSdkLoginCredentials:
 class GoogleAccessTokens:
     id_token: str
     access_token: str
+    refresh_token: str
 
     def decode_id_token(self) -> Dict[str, Any]:
         id_token = self.id_token
@@ -39,6 +44,8 @@ class GoogleSdkLoginFlowService:
     GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/auth"
     GOOGLE_ACCESS_TOKEN_OBTAIN_URL = "https://oauth2.googleapis.com/token"
     GOOGLE_USER_INFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
+    GOOGLE_ACCESS_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
+    GOOGLE_REFRESH_ACCESS_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
     # Add auth_provider_x509_cert_url if you want verification on JWTS such as ID tokens
     GOOGLE_AUTH_PROVIDER_CERT_URL = ""
@@ -104,7 +111,11 @@ class GoogleSdkLoginFlowService:
             client_config=client_config, scopes=self.SCOPES, state=state
         )
         flow.redirect_uri = redirect_uri
-        access_credentials_payload = flow.fetch_token(code=code)
+        try:
+            access_credentials_payload = flow.fetch_token(code=code)
+        except Exception as e:
+            print(e)
+            raise ApplicationError(f"Failed to obtain access credentials from Google {e}.") from e
 
         if not access_credentials_payload:
             raise ValidationError("Failed to obtain access credentials from Google")
@@ -123,7 +134,9 @@ class GoogleSdkLoginFlowService:
         print('credentials: ',creds )
         ####
         google_tokens = GoogleAccessTokens(
-            id_token=access_credentials_payload["id_token"], access_token=access_credentials_payload["access_token"]
+            id_token=access_credentials_payload["id_token"],
+            access_token=access_credentials_payload["access_token"],
+            refresh_token=access_credentials_payload["refresh_token"]
         )
 
         return google_tokens, creds
@@ -137,6 +150,32 @@ class GoogleSdkLoginFlowService:
             raise ApplicationError("Failed to obtain user info from Google.")
 
         return response.json()
+
+    def revoke_client_access(self, *, google_tokens: GoogleAccessTokens) -> Dict[str, Any]:
+        access_token = google_tokens.access_token
+        # Reference: https://developers.google.com/identity/protocols/oauth2/web-server#callinganapi
+        response = requests.get(
+            self.GOOGLE_ACCESS_REVOKE_URL,
+            params={"token": access_token},
+            headers={'content-type': 'application/x-www-form-urlencoded'}
+        )
+
+        if not response.ok:
+            raise ApplicationError("Failed to revoke access.")
+
+        return response.json()
+
+    def refresh_access_token(self, credentials: GoogleTokens) -> google.oauth2.credentials.Credentials:
+        credentials = google.oauth2.credentials.Credentials(**{'token': credentials.access_token,
+          'refresh_token': credentials.refresh_token,
+          'token_uri': self.GOOGLE_ACCESS_TOKEN_OBTAIN_URL,
+          'client_id': self._credentials.client_id,
+          'client_secret': self._credentials.client_secret,
+          'scopes': self.SCOPES})
+
+        credentials.refresh(google.auth.transport.requests.Request())
+
+        return credentials
 
 
 def google_sdk_login_get_credentials() -> GoogleSdkLoginCredentials:
